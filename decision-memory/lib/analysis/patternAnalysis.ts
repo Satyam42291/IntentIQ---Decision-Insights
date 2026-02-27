@@ -115,6 +115,46 @@ export interface RepeatInsight {
   unsureCount: number;
 }
 
+// Chart data for Insights UI
+export interface CalibrationBucket {
+  label: string;
+  confidenceMin: number;
+  confidenceMax: number;
+  confidenceMid: number;
+  actualPctAsExpectedOrBetter: number;
+  idealPct: number;
+  count: number;
+}
+
+export interface InfluenceComparisonRow {
+  driver: DecisionDriver;
+  label: string;
+  pctWorseThanExpected: number;
+  pctNotRepeat: number;
+  count: number;
+}
+
+export interface DomainRegretRow {
+  domain: DecisionType;
+  label: string;
+  pctNoRepeat: number;
+  count: number;
+}
+
+export interface TrendMonthRow {
+  month: string;
+  monthLabel: string;
+  pctWorseThanExpected: number;
+  count: number;
+}
+
+export interface InsightsChartData {
+  calibration: CalibrationBucket[];
+  influence: InfluenceComparisonRow[];
+  domainRegret: DomainRegretRow[];
+  trendOverTime: TrendMonthRow[];
+}
+
 export interface LegacyInsights extends Insights {
   reviewCount: number;
   minimumReviewsNeeded: number;
@@ -122,6 +162,7 @@ export interface LegacyInsights extends Insights {
   surprise?: SurpriseInsight | null;
   speed?: SpeedInsight | null;
   repeat?: RepeatInsight | null;
+  chartData?: InsightsChartData;
 }
 
 // Per-insight minimum sample sizes for statistical validity (Layer 0)
@@ -134,6 +175,20 @@ const GATING_THRESHOLDS = {
 
 function round(n: number, digits = 2) {
   return Math.round(n * Math.pow(10, digits)) / Math.pow(10, digits);
+}
+
+/** Get influence drivers for a decision (supports both decision_drivers and legacy decision_driver) */
+function getDrivers(d: Decision): DecisionDriver[] {
+  const drivers = d.decision_drivers ?? (d.decision_driver ? [d.decision_driver] : []);
+  return drivers.slice();
+}
+
+function isWorseThanExpected(comparison: string): boolean {
+  return comparison === 'slightly_worse' || comparison === 'much_worse';
+}
+
+function isAsExpectedOrBetter(comparison: string): boolean {
+  return !isWorseThanExpected(comparison);
 }
 
 /**
@@ -259,6 +314,124 @@ function mineSegments(derived: DerivedDecision[], baseline: ReturnType<typeof co
   });
 
   return segments.slice(0, 6); // keep top 6
+}
+
+/**
+ * A) Calibration chart: confidence buckets vs % as_expected or better, vs ideal diagonal
+ */
+function computeCalibrationChart(derived: DerivedDecision[]): CalibrationBucket[] {
+  const BUCKETS = [
+    { label: '0-20', min: 0, max: 20, mid: 10 },
+    { label: '21-40', min: 21, max: 40, mid: 30 },
+    { label: '41-60', min: 41, max: 60, mid: 50 },
+    { label: '61-80', min: 61, max: 80, mid: 70 },
+    { label: '81-100', min: 81, max: 100, mid: 90 },
+  ];
+  const result: CalibrationBucket[] = [];
+  for (const b of BUCKETS) {
+    const inBucket = derived.filter((d) => d.decision.confidence >= b.min && d.decision.confidence <= b.max);
+    const count = inBucket.length;
+    const asExpectedOrBetter = count ? inBucket.filter((d) => isAsExpectedOrBetter(d.review.expectation_comparison)).length : 0;
+    const actualPct = count > 0 ? round((asExpectedOrBetter / count) * 100) : 0;
+    const idealPct = b.mid; // ideal calibration: confidence % matches outcome %
+    result.push({
+      label: b.label,
+      confidenceMin: b.min,
+      confidenceMax: b.max,
+      confidenceMid: b.mid,
+      actualPctAsExpectedOrBetter: actualPct,
+      idealPct,
+      count,
+    });
+  }
+  return result;
+}
+
+/**
+ * B) Influence comparison: per driver, % worse-than-expected and % not-repeat
+ */
+function computeInfluenceComparison(derived: DerivedDecision[]): InfluenceComparisonRow[] {
+  const DRIVER_LABELS: Record<DecisionDriver, string> = {
+    logic: 'Logic',
+    urgency: 'Urgency',
+    fear: 'Fear',
+    opportunity: 'Opportunity',
+    external_pressure: 'External pressure',
+    emotion: 'Emotion',
+  };
+  const agg = new Map<DecisionDriver, { worse: number; notRepeat: number; n: number }>();
+  for (const d of derived) {
+    const drivers = getDrivers(d.decision);
+    if (drivers.length === 0) continue;
+    for (const dr of drivers) {
+      const cur = agg.get(dr) ?? { worse: 0, notRepeat: 0, n: 0 };
+      cur.n += 1;
+      if (isWorseThanExpected(d.review.expectation_comparison)) cur.worse += 1;
+      if (d.review.would_repeat === 'no') cur.notRepeat += 1;
+      agg.set(dr, cur);
+    }
+  }
+  const result: InfluenceComparisonRow[] = [];
+  for (const [driver, v] of agg.entries()) {
+    result.push({
+      driver,
+      label: DRIVER_LABELS[driver],
+      pctWorseThanExpected: v.n > 0 ? round((v.worse / v.n) * 100) : 0,
+      pctNotRepeat: v.n > 0 ? round((v.notRepeat / v.n) * 100) : 0,
+      count: v.n,
+    });
+  }
+  result.sort((a, b) => b.count - a.count);
+  return result;
+}
+
+/**
+ * C) Domain regret: % no-repeat per decision_type
+ */
+function computeDomainRegret(derived: DerivedDecision[]): DomainRegretRow[] {
+  const domains: DecisionType[] = ['personal', 'work', 'finance', 'health', 'other'];
+  const result: DomainRegretRow[] = [];
+  for (const domain of domains) {
+    const inDomain = derived.filter((d) => d.decision.decision_type === domain);
+    const count = inDomain.length;
+    const noRepeat = count ? inDomain.filter((d) => d.review.would_repeat === 'no').length : 0;
+    const pctNoRepeat = count > 0 ? round((noRepeat / count) * 100) : 0;
+    result.push({
+      domain,
+      label: domain.charAt(0).toUpperCase() + domain.slice(1),
+      pctNoRepeat,
+      count,
+    });
+  }
+  return result.filter((r) => r.count > 0);
+}
+
+/**
+ * D) Trend over time: monthly % worse-than-expected
+ */
+function computeTrendOverTime(derived: DerivedDecision[]): TrendMonthRow[] {
+  const byMonth = new Map<string, { worse: number; n: number }>();
+  for (const d of derived) {
+    const date = d.reviewedAt;
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const cur = byMonth.get(key) ?? { worse: 0, n: 0 };
+    cur.n += 1;
+    if (isWorseThanExpected(d.review.expectation_comparison)) cur.worse += 1;
+    byMonth.set(key, cur);
+  }
+  const sortedKeys = Array.from(byMonth.keys()).sort();
+  const result: TrendMonthRow[] = sortedKeys.map((key) => {
+    const [y, m] = key.split('-');
+    const monthLabel = new Date(parseInt(y, 10), parseInt(m, 10) - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+    const v = byMonth.get(key)!;
+    return {
+      month: key,
+      monthLabel,
+      pctWorseThanExpected: v.n > 0 ? round((v.worse / v.n) * 100) : 0,
+      count: v.n,
+    };
+  });
+  return result;
 }
 
 /**
@@ -444,6 +617,14 @@ export async function generateInsights(decisions: Decision[], reviews: Review[])
     repeat = { emoji: '🔁', message: 'How often you would repeat decisions', repeatRate: rate, wouldRepeatCount: would, wouldNotRepeatCount: wouldNot, unsureCount: unsure };
   }
 
+  // Chart data for calibration, influence, domain regret, trend (always compute when we have reviews)
+  const chartData: InsightsChartData = {
+    calibration: computeCalibrationChart(derived),
+    influence: computeInfluenceComparison(derived),
+    domainRegret: computeDomainRegret(derived),
+    trendOverTime: computeTrendOverTime(derived),
+  };
+
   return {
     cards,
     baseline,
@@ -454,5 +635,6 @@ export async function generateInsights(decisions: Decision[], reviews: Review[])
     surprise,
     speed,
     repeat,
+    chartData,
   } as LegacyInsights;
 }

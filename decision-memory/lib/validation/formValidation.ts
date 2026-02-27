@@ -13,7 +13,7 @@ export interface FormErrors {
   decision_type?: string;
   importance?: string;
   decision_speed?: string;
-  decision_driver?: string;
+  decision_drivers?: string;
 }
 
 export interface FormData {
@@ -23,7 +23,7 @@ export interface FormData {
   decision_type: DecisionType;
   importance: Importance;
   decision_speed: DecisionSpeed;
-  decision_driver?: DecisionDriver;
+  decision_drivers?: DecisionDriver[];
   expected_outcome: string;
   review_date: string;
 }

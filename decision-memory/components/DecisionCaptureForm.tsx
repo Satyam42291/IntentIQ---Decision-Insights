@@ -23,7 +23,14 @@ export default function DecisionCaptureForm({ onSuccess, showOptionalFields = tr
   const DECISION_TYPES: DecisionType[] = ['personal', 'work', 'finance', 'health', 'other'];
   const IMPORTANCE_LEVELS: Importance[] = ['low', 'medium', 'high'];
   const DECISION_SPEEDS: DecisionSpeed[] = ['quick', 'moderate', 'slow'];
-  const DECISION_DRIVERS: DecisionDriver[] = ['logic', 'urgency', 'fear', 'opportunity', 'external_pressure'];
+  const DECISION_DRIVER_OPTIONS: { value: DecisionDriver; label: string; description: string }[] = [
+    { value: 'logic', label: '🧠 Logic', description: 'Reasoned analysis and facts' },
+    { value: 'urgency', label: '⏰ Urgency', description: 'Time pressure or deadlines' },
+    { value: 'fear', label: '😰 Fear', description: 'Avoiding loss or bad outcomes' },
+    { value: 'opportunity', label: '✨ Opportunity', description: 'Gaining something good' },
+    { value: 'external_pressure', label: '👥 External Pressure', description: 'Someone else influenced it' },
+    { value: 'emotion', label: '❤️ Emotion', description: 'Gut feeling or emotional pull' },
+  ];
 
   // Form state
   const [formData, setFormData] = useState<FormData>({
@@ -33,7 +40,7 @@ export default function DecisionCaptureForm({ onSuccess, showOptionalFields = tr
     decision_type: 'personal',
     importance: 'medium',
     decision_speed: 'moderate',
-    decision_driver: undefined,
+    decision_drivers: [],
     expected_outcome: '',
     review_date: getDefaultReviewDate(),
   });
@@ -86,7 +93,7 @@ export default function DecisionCaptureForm({ onSuccess, showOptionalFields = tr
           decision_type: formData.decision_type,
           importance: formData.importance,
           decision_speed: formData.decision_speed,
-          decision_driver: formData.decision_driver,
+          decision_drivers: formData.decision_drivers?.length ? formData.decision_drivers : undefined,
           expected_outcome: formData.expected_outcome.trim(),
           review_date: parseLocalDate(formData.review_date),
         });
@@ -100,7 +107,7 @@ export default function DecisionCaptureForm({ onSuccess, showOptionalFields = tr
           decision_type: 'personal',
           importance: 'medium',
           decision_speed: 'moderate',
-          decision_driver: undefined,
+          decision_drivers: [],
           expected_outcome: '',
           review_date: getDefaultReviewDate(),
         });
@@ -284,42 +291,46 @@ export default function DecisionCaptureForm({ onSuccess, showOptionalFields = tr
       {/* Optional Fields */}
       {showOptionalFields && (
         <>
-          {/* Decision Driver */}
+          {/* Decision Drivers (multi-select) */}
           <div>
-            <label htmlFor="decision_driver" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-              What influenced this decision most? (optional)
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+              What influenced this decision? (optional — select all that apply)
             </label>
             <div className="space-y-2">
-              {[
-                { value: 'logic', label: '🧠 Logic', description: 'Reasoned analysis and facts' },
-                { value: 'urgency', label: '⏰ Urgency', description: 'Time pressure or deadlines' },
-                { value: 'fear', label: '😰 Fear', description: 'Avoiding loss or bad outcomes' },
-                { value: 'opportunity', label: '✨ Opportunity', description: 'Gaining something good' },
-                { value: 'external_pressure', label: '👥 External Pressure', description: 'Someone else influenced it' },
-              ].map((option) => (
-                <label
-                  key={option.value}
-                  className={`flex items-center p-3 border rounded-lg cursor-pointer transition-all ${
-                    formData.decision_driver === option.value
-                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                      : 'border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="decision_driver"
-                    value={option.value}
-                    checked={formData.decision_driver === option.value}
-                    onChange={handleChange}
-                    className="w-4 h-4 text-blue-600 cursor-pointer"
-                    disabled={isSubmitting}
-                  />
-                  <div className="ml-3">
-                    <p className="font-medium text-gray-900 dark:text-white">{option.label}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{option.description}</p>
-                  </div>
-                </label>
-              ))}
+              {DECISION_DRIVER_OPTIONS.map((option) => {
+                const checked = formData.decision_drivers?.includes(option.value) ?? false;
+                return (
+                  <label
+                    key={option.value}
+                    className={`flex items-center p-3 border rounded-lg cursor-pointer transition-all ${
+                      checked
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                        : 'border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      name="decision_drivers"
+                      value={option.value}
+                      checked={checked}
+                      onChange={(e) => {
+                        const next = formData.decision_drivers ?? [];
+                        if (e.target.checked) {
+                          setFormData((prev) => ({ ...prev, decision_drivers: [...(prev.decision_drivers ?? []), option.value] }));
+                        } else {
+                          setFormData((prev) => ({ ...prev, decision_drivers: (prev.decision_drivers ?? []).filter((d) => d !== option.value) }));
+                        }
+                      }}
+                      className="w-4 h-4 text-blue-600 cursor-pointer rounded border-gray-300 dark:border-slate-600"
+                      disabled={isSubmitting}
+                    />
+                    <div className="ml-3">
+                      <p className="font-medium text-gray-900 dark:text-white">{option.label}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{option.description}</p>
+                    </div>
+                  </label>
+                );
+              })}
             </div>
           </div>
 

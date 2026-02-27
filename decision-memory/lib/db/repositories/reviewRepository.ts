@@ -30,10 +30,17 @@ export class ReviewRepository {
   }
 
   /**
-   * Get review for a specific decision
+   * Get review for a specific decision.
+   * Tries both string and number so lookup works whether decision_id was stored as "1" or 1
+   * (Dexie auto-increment returns number; callers may pass String(dec.id)).
    */
-  async getByDecisionId(decisionId: string): Promise<Review | undefined> {
-    return db.reviews.where('decision_id').equals(decisionId).first();
+  async getByDecisionId(decisionId: string | number): Promise<Review | undefined> {
+    const asString = String(decisionId);
+    let review = await db.reviews.where('decision_id').equals(asString).first();
+    if (!review && asString !== '' && /^\d+$/.test(asString)) {
+      review = await db.reviews.where('decision_id').equals(Number(decisionId)).first();
+    }
+    return review;
   }
 
   /**
@@ -44,10 +51,12 @@ export class ReviewRepository {
   }
 
   /**
-   * Get reviews for multiple decisions
+   * Get reviews for multiple decisions.
+   * Normalizes ids to strings so it works with numeric decision ids from Dexie.
    */
-  async getByDecisionIds(decisionIds: string[]): Promise<Review[]> {
-    return db.reviews.where('decision_id').anyOf(decisionIds).toArray();
+  async getByDecisionIds(decisionIds: (string | number)[]): Promise<Review[]> {
+    const normalized = decisionIds.map((id) => String(id));
+    return db.reviews.where('decision_id').anyOf(normalized).toArray();
   }
 
   /**

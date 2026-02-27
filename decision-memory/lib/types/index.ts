@@ -13,10 +13,10 @@ export type Importance = 'low' | 'medium' | 'high';
 export type DecisionSpeed = 'quick' | 'moderate' | 'slow';
 
 /**
- * What primarily influenced the decision?
+ * What influenced the decision? (multiple can apply)
  * Reveals emotional vs logical patterns
  */
-export type DecisionDriver = 'logic' | 'urgency' | 'fear' | 'opportunity' | 'external_pressure';
+export type DecisionDriver = 'logic' | 'urgency' | 'fear' | 'opportunity' | 'external_pressure' | 'emotion';
 
 /**
  * Reality vs Expectation comparison
@@ -58,7 +58,10 @@ export interface Decision {
   decision_type: DecisionType;
   importance: Importance;
   decision_speed: DecisionSpeed; // How quickly was this decided?
-  decision_driver?: DecisionDriver; // What influenced this decision most?
+  /** What influenced this decision? Multiple can be selected. */
+  decision_drivers?: DecisionDriver[];
+  /** @deprecated Use decision_drivers. Kept for backward compatibility with existing records. */
+  decision_driver?: DecisionDriver;
   expected_outcome: string;
   review_date: Date;
   created_at: Date;

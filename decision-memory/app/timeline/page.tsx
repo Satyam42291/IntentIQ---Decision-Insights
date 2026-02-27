@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { decisionRepository, reviewRepository } from '@/lib';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -20,53 +20,57 @@ export default function TimelinePage() {
     good_thinking_despite_bad_outcomes: 0,
   });
 
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        const allDecisions = await decisionRepository.getAll();
-        const decisionsWithReviews = await Promise.all(
-          allDecisions.map(async (dec) => ({
-            ...dec,
-            review: await reviewRepository.getByDecisionId(String(dec.id)),
-          }))
-        );
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const allDecisions = await decisionRepository.getAll();
+      const decisionsWithReviews = await Promise.all(
+        allDecisions.map(async (dec) => ({
+          ...dec,
+          review: await reviewRepository.getByDecisionId(String(dec.id)),
+        }))
+      );
 
-        // Calculate new metrics
-        const reviewed = decisionsWithReviews.filter((d) => d.review).length;
-        
-        // Calibration: measure how accurate surprise predictions were
-        // Lower surprise on expected outcomes = good calibration
-        const surpriseScores = decisionsWithReviews
-          .filter((d) => d.review && d.review.expectation_comparison === 'as_expected')
-          .map((d) => d.review?.surprise_score || 0);
-        const avgSurpriseWhenAccurate = surpriseScores.length > 0 
-          ? 100 - (surpriseScores.reduce((a, b) => a + b, 0) / surpriseScores.length)
-          : 0;
+      // Calculate new metrics
+      const reviewed = decisionsWithReviews.filter((d) => d.review).length;
 
-        // Good thinking despite bad outcomes: count instances where decision_quality is high
-        // but expectation_comparison shows worse outcome
-        const thoughtfulDespiteBadOutcome = decisionsWithReviews.filter((d) => 
-          d.review && 
-          (d.review.decision_quality === 'very_thoughtful' || d.review.decision_quality === 'reasonable') &&
-          (d.review.expectation_comparison === 'slightly_worse' || d.review.expectation_comparison === 'much_worse')
-        ).length;
+      const surpriseScores = decisionsWithReviews
+        .filter((d) => d.review && d.review.expectation_comparison === 'as_expected')
+        .map((d) => d.review?.surprise_score || 0);
+      const avgSurpriseWhenAccurate = surpriseScores.length > 0
+        ? 100 - (surpriseScores.reduce((a, b) => a + b, 0) / surpriseScores.length)
+        : 0;
 
-        setDecisions(decisionsWithReviews.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
-        setStats({
-          total: allDecisions.length,
-          reviewed,
-          calibration_score: Math.round(avgSurpriseWhenAccurate),
-          good_thinking_despite_bad_outcomes: thoughtfulDespiteBadOutcome,
-        });
-      } catch (err) {
-        console.error('Failed to load timeline:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
+      const thoughtfulDespiteBadOutcome = decisionsWithReviews.filter((d) =>
+        d.review &&
+        (d.review.decision_quality === 'very_thoughtful' || d.review.decision_quality === 'reasonable') &&
+        (d.review.expectation_comparison === 'slightly_worse' || d.review.expectation_comparison === 'much_worse')
+      ).length;
 
-    loadData();
+      setDecisions(decisionsWithReviews.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+      setStats({
+        total: allDecisions.length,
+        reviewed,
+        calibration_score: Math.round(avgSurpriseWhenAccurate),
+        good_thinking_despite_bad_outcomes: thoughtfulDespiteBadOutcome,
+      });
+    } catch (err) {
+      console.error('Failed to load timeline:', err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Refetch when window gains focus so timeline updates after seeding on Debug
+  useEffect(() => {
+    const onFocus = () => loadData();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [loadData]);
 
   if (loading) {
     return (

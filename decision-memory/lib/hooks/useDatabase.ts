@@ -34,6 +34,13 @@ export function useDecisions() {
     refresh();
   }, [refresh]);
 
+  // Refetch when window gains focus (e.g. after seeding on Debug in same tab or returning from another tab)
+  useEffect(() => {
+    const onFocus = () => refresh();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [refresh]);
+
   return { decisions, loading, error, refresh };
 }
 
@@ -60,6 +67,13 @@ export function useDueDecisions() {
 
   useEffect(() => {
     refresh();
+  }, [refresh]);
+
+  // Refetch when window gains focus so due count updates after seeding/reviews
+  useEffect(() => {
+    const onFocus = () => refresh();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
   }, [refresh]);
 
   return { decisions, loading, error, refresh };

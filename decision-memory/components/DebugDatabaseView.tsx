@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { decisionRepository, reviewRepository, clearDatabase } from '@/lib';
+import Link from 'next/link';
+import { decisionRepository, reviewRepository, clearDatabase, seedSampleDecisions } from '@/lib';
 import type { Decision, Review } from '@/lib';
 
 export default function DebugPage() {
@@ -10,6 +11,7 @@ export default function DebugPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [seedSuccess, setSeedSuccess] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -38,6 +40,25 @@ export default function DebugPage() {
 
     fetchData();
   }, []);
+
+  // Add 20 realistic sample decisions + reviews (does not clear DB)
+  async function handleSeedFourRealistic() {
+    try {
+      setBusy(true);
+      setError(null);
+      setSeedSuccess(false);
+      await seedSampleDecisions();
+      const decs = await decisionRepository.getAll();
+      const revs = await reviewRepository.getAll();
+      setDecisions(decs);
+      setReviews(revs);
+      setSeedSuccess(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   // Helper: Clear DB and optionally seed sample decisions+reviews
   async function handleClearAndSeed(seedCount = 0) {
@@ -95,7 +116,22 @@ export default function DebugPage() {
       <div className="max-w-4xl mx-auto">
         <h1 className="text-3xl font-bold text-gray-900 mb-8">🔍 Database Debug</h1>
 
+        {seedSuccess && (
+          <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-between">
+            <p className="text-emerald-800 font-medium">
+              ✓ 20 sample decisions and reviews added. View them on the <Link href="/timeline" className="underline font-semibold">Timeline</Link> or <Link href="/" className="underline font-semibold">Home</Link>.
+            </p>
+            <button type="button" onClick={() => setSeedSuccess(false)} className="text-emerald-600 hover:text-emerald-800 text-sm">Dismiss</button>
+          </div>
+        )}
         <div className="flex items-center gap-3 mb-6">
+          <button
+            className="px-3 py-2 bg-emerald-600 text-white rounded shadow"
+            onClick={handleSeedFourRealistic}
+            disabled={busy}
+          >
+            Add 20 sample decisions (realistic)
+          </button>
           <button
             className="px-3 py-2 bg-red-600 text-white rounded shadow"
             onClick={() => handleClearAndSeed(0)}

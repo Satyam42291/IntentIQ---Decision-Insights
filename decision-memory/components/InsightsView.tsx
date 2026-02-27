@@ -2,7 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { decisionRepository, reviewRepository, generateInsights } from '@/lib';
-import type { Insights as LegacyInsights } from '@/lib';
+import type {
+  Insights as LegacyInsights,
+  CalibrationBucket,
+  InfluenceComparisonRow,
+  DomainRegretRow,
+  TrendMonthRow,
+} from '@/lib';
 
 export default function InsightsView() {
   const [insights, setInsights] = useState<LegacyInsights | null>(null);
@@ -172,6 +178,55 @@ export default function InsightsView() {
           )}
         </div>
 
+        {/* Charts */}
+        {insights.chartData && (
+          <div className="space-y-8 mt-12">
+            {/* A) Calibration Chart */}
+            {insights.chartData.calibration.some((b) => b.count > 0) && (
+              <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800 p-6">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Calibration Chart</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                  Confidence buckets vs % of outcomes that were as expected or better. Diagonal = ideal calibration.
+                </p>
+                <CalibrationChart buckets={insights.chartData.calibration} />
+              </div>
+            )}
+
+            {/* B) Influence Comparison */}
+            {insights.chartData.influence.length > 0 && (
+              <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800 p-6">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Influence Comparison</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                  For each influence type: % worse-than-expected outcomes and % would not repeat.
+                </p>
+                <InfluenceBarChart rows={insights.chartData.influence} />
+              </div>
+            )}
+
+            {/* C) Domain Regret Distribution */}
+            {insights.chartData.domainRegret.length > 0 && (
+              <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800 p-6">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Domain Regret Distribution</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                  % of decisions marked &quot;would not repeat&quot; per domain.
+                </p>
+                <DomainRegretChart rows={insights.chartData.domainRegret} />
+              </div>
+            )}
+
+            {/* D) Trend Over Time */}
+            {insights.chartData.trendOverTime.length > 0 && (
+              <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800 p-6">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Trend Over Time</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                  Monthly % of outcomes that were worse than expected.
+                </p>
+                <TrendLineChart rows={insights.chartData.trendOverTime} />
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Reflection Prompt */}
         <div className="mt-16 bg-gradient-to-br from-purple-50 dark:from-purple-900/20 to-blue-50 dark:to-blue-900/20 border border-purple-200 dark:border-slate-800 rounded-lg p-8 text-center">
           <p className="text-gray-700 dark:text-gray-300 text-lg mb-4">
@@ -222,6 +277,122 @@ function InsightCard({ emoji, title, message, details }: InsightCardProps) {
           ))}
         </ul>
       </div>
+    </div>
+  );
+}
+
+// --- Chart components (SVG / CSS) ---
+
+const CHART_WIDTH = 500;
+const CHART_HEIGHT = 220;
+const PAD = { left: 50, right: 20, top: 20, bottom: 40 };
+
+function CalibrationChart({ buckets }: { buckets: CalibrationBucket[] }) {
+  const withData = buckets.filter((b) => b.count > 0);
+  if (withData.length === 0) return <p className="text-sm text-gray-500 dark:text-gray-400">No data in any confidence bucket yet.</p>;
+
+  const innerW = CHART_WIDTH - PAD.left - PAD.right;
+  const innerH = CHART_HEIGHT - PAD.top - PAD.bottom;
+  const x = (i: number) => PAD.left + (i / Math.max(withData.length - 1, 1)) * innerW;
+  const y = (pct: number) => PAD.top + innerH - (pct / 100) * innerH;
+
+  const actualPoints = withData.map((b, i) => `${x(i)},${y(b.actualPctAsExpectedOrBetter)}`).join(' ');
+  const idealPoints = withData.map((b, i) => `${x(i)},${y(b.idealPct)}`).join(' ');
+
+  return (
+    <div className="overflow-x-auto">
+      <svg width={CHART_WIDTH} height={CHART_HEIGHT} className="min-w-[320px]">
+        <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={PAD.top + innerH} stroke="currentColor" strokeWidth={1} className="text-gray-400 dark:text-gray-500" />
+        <line x1={PAD.left} y1={PAD.top + innerH} x2={PAD.left + innerW} y2={PAD.top + innerH} stroke="currentColor" strokeWidth={1} className="text-gray-400 dark:text-gray-500" />
+        <polyline points={idealPoints} fill="none" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 2" />
+        <polyline points={actualPoints} fill="none" stroke="#3b82f6" strokeWidth={2} />
+        {withData.map((b, i) => (
+          <text key={b.label} x={x(i)} y={CHART_HEIGHT - 8} textAnchor="middle" className="text-[10px] fill-gray-600 dark:fill-gray-400">
+            {b.label}
+          </text>
+        ))}
+      </svg>
+      <div className="flex gap-4 mt-2 text-xs text-gray-600 dark:text-gray-400">
+        <span className="flex items-center gap-1"><span className="inline-block w-4 h-0.5 bg-blue-500" /> Actual</span>
+        <span className="flex items-center gap-1"><span className="inline-block w-4 h-0.5 bg-slate-400 border border-dashed" /> Ideal</span>
+      </div>
+    </div>
+  );
+}
+
+function InfluenceBarChart({ rows }: { rows: InfluenceComparisonRow[] }) {
+  const maxPct = Math.max(100, ...rows.flatMap((r) => [r.pctWorseThanExpected, r.pctNotRepeat]));
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-6 text-xs text-gray-600 dark:text-gray-400 mb-2">
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-amber-500" /> Worse than expected %</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-rose-500" /> Would not repeat %</span>
+      </div>
+      {rows.map((r) => (
+        <div key={r.driver} className="flex items-center gap-3">
+          <span className="w-28 text-sm text-gray-700 dark:text-gray-300 shrink-0">{r.label}</span>
+          <div className="flex-1 flex items-center gap-1" style={{ maxWidth: 320 }}>
+            <div
+              className="h-6 rounded bg-amber-500 dark:bg-amber-600 shrink-0"
+              style={{ width: Math.max(4, (r.pctWorseThanExpected / maxPct) * 200) }}
+              title={`${r.pctWorseThanExpected}% worse`}
+            />
+            <div
+              className="h-6 rounded bg-rose-500 dark:bg-rose-600 shrink-0"
+              style={{ width: Math.max(4, (r.pctNotRepeat / maxPct) * 200) }}
+              title={`${r.pctNotRepeat}% not repeat`}
+            />
+          </div>
+          <span className="text-xs text-gray-500 dark:text-gray-400 w-16">n={r.count}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DomainRegretChart({ rows }: { rows: DomainRegretRow[] }) {
+  return (
+    <div className="space-y-3">
+      {rows.map((r) => (
+        <div key={r.domain} className="flex items-center gap-3">
+          <span className="w-24 text-sm text-gray-700 dark:text-gray-300 shrink-0">{r.label}</span>
+          <div className="flex-1 max-w-xs h-6 bg-gray-100 dark:bg-slate-800 rounded overflow-hidden">
+            <div
+              className="h-full bg-rose-500 dark:bg-rose-600 rounded"
+              style={{ width: `${Math.min(100, r.pctNoRepeat)}%` }}
+            />
+          </div>
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 w-12">{r.pctNoRepeat}%</span>
+          <span className="text-xs text-gray-500 dark:text-gray-400">({r.count})</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TrendLineChart({ rows }: { rows: TrendMonthRow[] }) {
+  const innerW = CHART_WIDTH - PAD.left - PAD.right;
+  const innerH = CHART_HEIGHT - PAD.top - PAD.bottom;
+  const maxPct = 100; // fixed 0-100% scale
+  const x = (i: number) => PAD.left + (i / Math.max(rows.length - 1, 1)) * innerW;
+  const y = (pct: number) => PAD.top + innerH - (pct / maxPct) * innerH;
+
+  const points = rows.map((r, i) => `${x(i)},${y(r.pctWorseThanExpected)}`).join(' ');
+
+  return (
+    <div className="overflow-x-auto">
+      <svg width={CHART_WIDTH} height={CHART_HEIGHT} className="min-w-[320px]">
+        <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={PAD.top + innerH} stroke="currentColor" strokeWidth={1} className="text-gray-400 dark:text-gray-500" />
+        <line x1={PAD.left} y1={PAD.top + innerH} x2={PAD.left + innerW} y2={PAD.top + innerH} stroke="currentColor" strokeWidth={1} className="text-gray-400 dark:text-gray-500" />
+        <polyline points={points} fill="none" stroke="#f43f5e" strokeWidth={2} />
+        {rows.map((r, i) => (
+          <text key={r.month} x={x(i)} y={CHART_HEIGHT - 8} textAnchor="middle" className="text-[10px] fill-gray-600 dark:fill-gray-400">
+            {r.monthLabel}
+          </text>
+        ))}
+      </svg>
+      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Y-axis: % worse than expected in that month</p>
     </div>
   );
 }
