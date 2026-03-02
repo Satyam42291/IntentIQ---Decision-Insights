@@ -8,12 +8,31 @@ import type {
   InfluenceComparisonRow,
   DomainRegretRow,
   TrendMonthRow,
+  DerivedDecision,
 } from '@/lib';
+
+const EXPECTATION_LABELS: Record<string, string> = {
+  much_better: 'Much better',
+  slightly_better: 'Slightly better',
+  as_expected: 'As expected',
+  slightly_worse: 'Slightly worse',
+  much_worse: 'Much worse',
+};
+
+const DRIVER_LABELS: Record<string, string> = {
+  logic: 'Logic',
+  urgency: 'Urgency',
+  fear: 'Fear',
+  opportunity: 'Opportunity',
+  external_pressure: 'External pressure',
+  emotion: 'Emotion',
+};
 
 export default function InsightsView() {
   const [insights, setInsights] = useState<LegacyInsights | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [drawer, setDrawer] = useState<{ title: string; segmentLabel: string; decisions: DerivedDecision[] } | null>(null);
 
   useEffect(() => {
     const loadInsights = async () => {
@@ -113,9 +132,8 @@ export default function InsightsView() {
           </p>
         </div>
 
-        {/* Insight Cards */}
+        {/* Insight Cards (with drill-down) */}
         <div className="space-y-8">
-          {/* Confidence Insight */}
           {insights.confidence && (
             <InsightCard
               emoji={insights.confidence.emoji}
@@ -127,10 +145,15 @@ export default function InsightsView() {
                 `Overconfident moments: ${insights.confidence.overconfidentCount}`,
                 `Underconfident moments: ${insights.confidence.underconfidentCount}`,
               ]}
+              segments={[
+                { segmentLabel: 'Well-calibrated', count: insights.confidence.wellCalibratedCount, decisions: insights.confidence.wellCalibratedDecisions },
+                { segmentLabel: 'Overconfident', count: insights.confidence.overconfidentCount, decisions: insights.confidence.overconfidentDecisions },
+                { segmentLabel: 'Underconfident', count: insights.confidence.underconfidentCount, decisions: insights.confidence.underconfidentDecisions },
+              ]}
+              onOpenDrawer={(segmentLabel, decisions) => setDrawer({ title: 'Confidence Reality Gap', segmentLabel, decisions })}
             />
           )}
 
-          {/* Surprise Insight */}
           {insights.surprise && (
             <InsightCard
               emoji={insights.surprise.emoji}
@@ -145,10 +168,17 @@ export default function InsightsView() {
                   ? [`Most predictable: ${insights.surprise.leastSurprisedDomain} decisions`]
                   : []),
               ]}
+              segments={(['personal', 'work', 'finance', 'health', 'other'] as const)
+                .filter((d) => insights.surprise!.decisionsByDomain[d].length > 0)
+                .map((domain) => ({
+                  segmentLabel: domain.charAt(0).toUpperCase() + domain.slice(1),
+                  count: insights.surprise!.decisionsByDomain[domain].length,
+                  decisions: insights.surprise!.decisionsByDomain[domain],
+                }))}
+              onOpenDrawer={(segmentLabel, decisions) => setDrawer({ title: 'Surprise Patterns', segmentLabel, decisions })}
             />
           )}
 
-          {/* Speed Insight */}
           {insights.speed && (
             <InsightCard
               emoji={insights.speed.emoji}
@@ -159,10 +189,15 @@ export default function InsightsView() {
                 `Moderate decisions regretted: ${insights.speed.moderateDecisionsRegretRate}%`,
                 `Slow decisions regretted: ${insights.speed.slowDecisionsRegretRate}%`,
               ]}
+              segments={[
+                { segmentLabel: 'Quick', count: insights.speed.quickDecisions.length, decisions: insights.speed.quickDecisions },
+                { segmentLabel: 'Moderate', count: insights.speed.moderateDecisions.length, decisions: insights.speed.moderateDecisions },
+                { segmentLabel: 'Slow', count: insights.speed.slowDecisions.length, decisions: insights.speed.slowDecisions },
+              ]}
+              onOpenDrawer={(segmentLabel, decisions) => setDrawer({ title: 'Speed & Regret', segmentLabel, decisions })}
             />
           )}
 
-          {/* Repeat Insight */}
           {insights.repeat && (
             <InsightCard
               emoji={insights.repeat.emoji}
@@ -174,9 +209,25 @@ export default function InsightsView() {
                 `Regretted decisions: ${insights.repeat.wouldNotRepeatCount}`,
                 `Unsure about: ${insights.repeat.unsureCount}`,
               ]}
+              segments={[
+                { segmentLabel: 'Would repeat', count: insights.repeat.wouldRepeatCount, decisions: insights.repeat.wouldRepeatDecisions },
+                { segmentLabel: 'Would not repeat', count: insights.repeat.wouldNotRepeatCount, decisions: insights.repeat.wouldNotRepeatDecisions },
+                { segmentLabel: 'Unsure', count: insights.repeat.unsureCount, decisions: insights.repeat.unsureDecisions },
+              ]}
+              onOpenDrawer={(segmentLabel, decisions) => setDrawer({ title: 'Repeat Rate', segmentLabel, decisions })}
             />
           )}
         </div>
+
+        {/* Drill-down drawer */}
+        {drawer && (
+          <DrillDownDrawer
+            title={drawer.title}
+            segmentLabel={drawer.segmentLabel}
+            decisions={drawer.decisions}
+            onClose={() => setDrawer(null)}
+          />
+        )}
 
         {/* Charts */}
         {insights.chartData && (
@@ -186,42 +237,51 @@ export default function InsightsView() {
               <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800 p-6">
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Calibration Chart</h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                  Confidence buckets vs % of outcomes that were as expected or better. Diagonal = ideal calibration.
+                  Confidence buckets vs % of outcomes that were as expected or better. Click a bucket to see which decisions contributed.
                 </p>
-                <CalibrationChart buckets={insights.chartData.calibration} />
+                <CalibrationChart
+                  buckets={insights.chartData.calibration}
+                  onOpenDrawer={(segmentLabel, decisions) => setDrawer({ title: 'Calibration Chart', segmentLabel, decisions })}
+                />
               </div>
             )}
 
-            {/* B) Influence Comparison */}
             {insights.chartData.influence.length > 0 && (
               <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800 p-6">
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Influence Comparison</h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                  For each influence type: % worse-than-expected outcomes and % would not repeat.
+                  For each influence type: % worse-than-expected and % would not repeat. Click a row to see which decisions contributed.
                 </p>
-                <InfluenceBarChart rows={insights.chartData.influence} />
+                <InfluenceBarChart
+                  rows={insights.chartData.influence}
+                  onOpenDrawer={(segmentLabel, decisions) => setDrawer({ title: 'Influence Comparison', segmentLabel, decisions })}
+                />
               </div>
             )}
 
-            {/* C) Domain Regret Distribution */}
             {insights.chartData.domainRegret.length > 0 && (
               <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800 p-6">
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Domain Regret Distribution</h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                  % of decisions marked &quot;would not repeat&quot; per domain.
+                  % of decisions marked &quot;would not repeat&quot; per domain. Click a row to see which decisions contributed.
                 </p>
-                <DomainRegretChart rows={insights.chartData.domainRegret} />
+                <DomainRegretChart
+                  rows={insights.chartData.domainRegret}
+                  onOpenDrawer={(segmentLabel, decisions) => setDrawer({ title: 'Domain Regret', segmentLabel, decisions })}
+                />
               </div>
             )}
 
-            {/* D) Trend Over Time */}
             {insights.chartData.trendOverTime.length > 0 && (
               <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800 p-6">
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Trend Over Time</h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                  Monthly % of outcomes that were worse than expected.
+                  Monthly % worse than expected. Click a month to see which decisions contributed.
                 </p>
-                <TrendLineChart rows={insights.chartData.trendOverTime} />
+                <TrendLineChart
+                  rows={insights.chartData.trendOverTime}
+                  onOpenDrawer={(segmentLabel, decisions) => setDrawer({ title: 'Trend Over Time', segmentLabel, decisions })}
+                />
               </div>
             )}
           </div>
@@ -247,17 +307,24 @@ export default function InsightsView() {
   );
 }
 
+interface DrillDownSegment {
+  segmentLabel: string;
+  count: number;
+  decisions: DerivedDecision[];
+}
+
 interface InsightCardProps {
   emoji: string;
   title: string;
   message: string;
   details: string[];
+  segments?: DrillDownSegment[];
+  onOpenDrawer?: (segmentLabel: string, decisions: DerivedDecision[]) => void;
 }
 
-function InsightCard({ emoji, title, message, details }: InsightCardProps) {
+function InsightCard({ emoji, title, message, details, segments, onOpenDrawer }: InsightCardProps) {
   return (
     <div className="bg-white dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-800 p-8">
-      {/* Header */}
       <div className="flex items-start gap-4 mb-6">
         <span className="text-4xl">{emoji}</span>
         <div className="flex-1">
@@ -265,19 +332,100 @@ function InsightCard({ emoji, title, message, details }: InsightCardProps) {
           <p className="text-gray-600 dark:text-gray-400 mt-2 text-lg leading-relaxed">{message}</p>
         </div>
       </div>
-
-      {/* Details */}
       <div className="bg-gray-50 dark:bg-slate-800 rounded-lg p-4">
         <ul className="space-y-2">
           {details.map((detail, i) => (
             <li key={i} className="text-sm text-gray-700 dark:text-gray-300 flex items-center gap-3">
-              <span className="w-1 h-1 bg-gray-400 dark:bg-gray-500 rounded-full"></span>
+              <span className="w-1 h-1 bg-gray-400 dark:bg-gray-500 rounded-full shrink-0" />
               {detail}
             </li>
           ))}
         </ul>
+        {segments && onOpenDrawer && segments.some((s) => s.count > 0) && (
+          <div className="mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Click to see which decisions contributed:</p>
+            <div className="flex flex-wrap gap-2">
+              {segments.filter((s) => s.count > 0).map((s) => (
+                <button
+                  key={s.segmentLabel}
+                  type="button"
+                  onClick={() => onOpenDrawer(s.segmentLabel, s.decisions)}
+                  className="text-sm text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                >
+                  {s.segmentLabel}: {s.count} decision{s.count !== 1 ? 's' : ''}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+function DrillDownDrawer({
+  title,
+  segmentLabel,
+  decisions,
+  onClose,
+}: {
+  title: string;
+  segmentLabel: string;
+  decisions: DerivedDecision[];
+  onClose: () => void;
+}) {
+  const drivers = (d: DerivedDecision) => {
+    const dr = d.decision.decision_drivers ?? (d.decision.decision_driver ? [d.decision.decision_driver] : []);
+    return dr.map((x) => DRIVER_LABELS[x] ?? x).join(', ') || '—';
+  };
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/50 z-40" aria-hidden onClick={onClose} />
+      <div className="fixed top-0 right-0 bottom-0 w-full max-w-md bg-white dark:bg-slate-900 shadow-xl z-50 flex flex-col overflow-hidden">
+        <div className="p-4 border-b border-gray-200 dark:border-slate-800 flex items-center justify-between shrink-0">
+          <div>
+            <h3 className="font-bold text-gray-900 dark:text-white">{title}</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400">{segmentLabel} · {decisions.length} decision{decisions.length !== 1 ? 's' : ''}</p>
+          </div>
+          <button type="button" onClick={onClose} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-600 dark:text-gray-400" aria-label="Close">
+            ✕
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {decisions.length === 0 ? (
+            <p className="text-sm text-gray-500 dark:text-gray-400">No decisions in this segment.</p>
+          ) : (
+            decisions.map((d) => (
+              <div key={String(d.decision.id)} className="rounded-lg border border-gray-200 dark:border-slate-700 p-4 bg-gray-50 dark:bg-slate-800/50 space-y-2">
+                <p className="font-medium text-gray-900 dark:text-white">{d.decision.title}</p>
+                <dl className="text-xs grid gap-1">
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-gray-500 dark:text-gray-400">Confidence</dt>
+                    <dd className="text-gray-900 dark:text-white">{d.decision.confidence}%</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-gray-500 dark:text-gray-400">Outcome</dt>
+                    <dd className="text-gray-900 dark:text-white">{EXPECTATION_LABELS[d.review.expectation_comparison] ?? d.review.expectation_comparison}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-gray-500 dark:text-gray-400">Influence</dt>
+                    <dd className="text-gray-900 dark:text-white">{drivers(d)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-gray-500 dark:text-gray-400">Domain</dt>
+                    <dd className="text-gray-900 dark:text-white capitalize">{d.decision.decision_type}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-gray-500 dark:text-gray-400">Review date</dt>
+                    <dd className="text-gray-900 dark:text-white">{d.reviewedAt.toLocaleDateString()}</dd>
+                  </div>
+                </dl>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -287,7 +435,7 @@ const CHART_WIDTH = 500;
 const CHART_HEIGHT = 220;
 const PAD = { left: 50, right: 20, top: 20, bottom: 40 };
 
-function CalibrationChart({ buckets }: { buckets: CalibrationBucket[] }) {
+function CalibrationChart({ buckets, onOpenDrawer }: { buckets: CalibrationBucket[]; onOpenDrawer?: (segmentLabel: string, decisions: DerivedDecision[]) => void }) {
   const withData = buckets.filter((b) => b.count > 0);
   if (withData.length === 0) return <p className="text-sm text-gray-500 dark:text-gray-400">No data in any confidence bucket yet.</p>;
 
@@ -312,15 +460,25 @@ function CalibrationChart({ buckets }: { buckets: CalibrationBucket[] }) {
           </text>
         ))}
       </svg>
-      <div className="flex gap-4 mt-2 text-xs text-gray-600 dark:text-gray-400">
-        <span className="flex items-center gap-1"><span className="inline-block w-4 h-0.5 bg-blue-500" /> Actual</span>
-        <span className="flex items-center gap-1"><span className="inline-block w-4 h-0.5 bg-slate-400 border border-dashed" /> Ideal</span>
+      <div className="flex flex-wrap gap-4 mt-2 text-xs">
+        <span className="flex items-center gap-1 text-gray-600 dark:text-gray-400"><span className="inline-block w-4 h-0.5 bg-blue-500" /> Actual</span>
+        <span className="flex items-center gap-1 text-gray-600 dark:text-gray-400"><span className="inline-block w-4 h-0.5 bg-slate-400 border border-dashed" /> Ideal</span>
+        {onOpenDrawer && withData.map((b) => (
+          <button
+            key={b.label}
+            type="button"
+            onClick={() => onOpenDrawer(`${b.label}% confidence → ${b.actualPctAsExpectedOrBetter}% aligned`, b.decisions)}
+            className="text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            {b.label}: {b.count} decision{b.count !== 1 ? 's' : ''}
+          </button>
+        ))}
       </div>
     </div>
   );
 }
 
-function InfluenceBarChart({ rows }: { rows: InfluenceComparisonRow[] }) {
+function InfluenceBarChart({ rows, onOpenDrawer }: { rows: InfluenceComparisonRow[]; onOpenDrawer?: (segmentLabel: string, decisions: DerivedDecision[]) => void }) {
   const maxPct = Math.max(100, ...rows.flatMap((r) => [r.pctWorseThanExpected, r.pctNotRepeat]));
 
   return (
@@ -344,14 +502,20 @@ function InfluenceBarChart({ rows }: { rows: InfluenceComparisonRow[] }) {
               title={`${r.pctNotRepeat}% not repeat`}
             />
           </div>
-          <span className="text-xs text-gray-500 dark:text-gray-400 w-16">n={r.count}</span>
+          {onOpenDrawer ? (
+            <button type="button" onClick={() => onOpenDrawer(r.label, r.decisions)} className="text-xs text-blue-600 dark:text-blue-400 hover:underline w-20 text-left">
+              n={r.count}
+            </button>
+          ) : (
+            <span className="text-xs text-gray-500 dark:text-gray-400 w-16">n={r.count}</span>
+          )}
         </div>
       ))}
     </div>
   );
 }
 
-function DomainRegretChart({ rows }: { rows: DomainRegretRow[] }) {
+function DomainRegretChart({ rows, onOpenDrawer }: { rows: DomainRegretRow[]; onOpenDrawer?: (segmentLabel: string, decisions: DerivedDecision[]) => void }) {
   return (
     <div className="space-y-3">
       {rows.map((r) => (
@@ -364,17 +528,23 @@ function DomainRegretChart({ rows }: { rows: DomainRegretRow[] }) {
             />
           </div>
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300 w-12">{r.pctNoRepeat}%</span>
-          <span className="text-xs text-gray-500 dark:text-gray-400">({r.count})</span>
+          {onOpenDrawer ? (
+            <button type="button" onClick={() => onOpenDrawer(r.label, r.decisions)} className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
+              ({r.count})
+            </button>
+          ) : (
+            <span className="text-xs text-gray-500 dark:text-gray-400">({r.count})</span>
+          )}
         </div>
       ))}
     </div>
   );
 }
 
-function TrendLineChart({ rows }: { rows: TrendMonthRow[] }) {
+function TrendLineChart({ rows, onOpenDrawer }: { rows: TrendMonthRow[]; onOpenDrawer?: (segmentLabel: string, decisions: DerivedDecision[]) => void }) {
   const innerW = CHART_WIDTH - PAD.left - PAD.right;
   const innerH = CHART_HEIGHT - PAD.top - PAD.bottom;
-  const maxPct = 100; // fixed 0-100% scale
+  const maxPct = 100;
   const x = (i: number) => PAD.left + (i / Math.max(rows.length - 1, 1)) * innerW;
   const y = (pct: number) => PAD.top + innerH - (pct / maxPct) * innerH;
 
@@ -392,7 +562,21 @@ function TrendLineChart({ rows }: { rows: TrendMonthRow[] }) {
           </text>
         ))}
       </svg>
-      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Y-axis: % worse than expected in that month</p>
+      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Y-axis: % worse than expected. Click a month below to see decisions:</p>
+      {onOpenDrawer && (
+        <div className="flex flex-wrap gap-2 mt-2">
+          {rows.map((r) => (
+            <button
+              key={r.month}
+              type="button"
+              onClick={() => onOpenDrawer(r.monthLabel, r.decisions)}
+              className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              {r.monthLabel} ({r.count})
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

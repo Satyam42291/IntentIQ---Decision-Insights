@@ -20,4 +20,5 @@ export type {
   InfluenceComparisonRow,
   DomainRegretRow,
   TrendMonthRow,
+  DerivedDecision,
 } from '@/lib/analysis/patternAnalysis';

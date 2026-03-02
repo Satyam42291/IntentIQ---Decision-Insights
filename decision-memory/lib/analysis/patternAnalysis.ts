@@ -80,7 +80,7 @@ export interface Insights {
   };
 }
 
-// Legacy UI insight shapes (kept for compatibility)
+// Legacy UI insight shapes with contributing decisions for drill-down transparency
 export interface ConfidenceInsight {
   emoji: string;
   message: string;
@@ -88,6 +88,9 @@ export interface ConfidenceInsight {
   wellCalibratedCount: number;
   overconfidentCount: number;
   underconfidentCount: number;
+  wellCalibratedDecisions: DerivedDecision[];
+  overconfidentDecisions: DerivedDecision[];
+  underconfidentDecisions: DerivedDecision[];
 }
 
 export interface SurpriseInsight {
@@ -96,6 +99,7 @@ export interface SurpriseInsight {
   averageSurpriseScore: number;
   mostSurprisedDomain?: string;
   leastSurprisedDomain?: string;
+  decisionsByDomain: Record<DecisionType, DerivedDecision[]>;
 }
 
 export interface SpeedInsight {
@@ -104,6 +108,9 @@ export interface SpeedInsight {
   quickDecisionsRegretRate: number;
   moderateDecisionsRegretRate: number;
   slowDecisionsRegretRate: number;
+  quickDecisions: DerivedDecision[];
+  moderateDecisions: DerivedDecision[];
+  slowDecisions: DerivedDecision[];
 }
 
 export interface RepeatInsight {
@@ -113,9 +120,12 @@ export interface RepeatInsight {
   wouldRepeatCount: number;
   wouldNotRepeatCount: number;
   unsureCount: number;
+  wouldRepeatDecisions: DerivedDecision[];
+  wouldNotRepeatDecisions: DerivedDecision[];
+  unsureDecisions: DerivedDecision[];
 }
 
-// Chart data for Insights UI
+// Chart data for Insights UI (each segment includes the filtered dataset for drill-down)
 export interface CalibrationBucket {
   label: string;
   confidenceMin: number;
@@ -124,6 +134,7 @@ export interface CalibrationBucket {
   actualPctAsExpectedOrBetter: number;
   idealPct: number;
   count: number;
+  decisions: DerivedDecision[];
 }
 
 export interface InfluenceComparisonRow {
@@ -132,6 +143,7 @@ export interface InfluenceComparisonRow {
   pctWorseThanExpected: number;
   pctNotRepeat: number;
   count: number;
+  decisions: DerivedDecision[];
 }
 
 export interface DomainRegretRow {
@@ -139,6 +151,7 @@ export interface DomainRegretRow {
   label: string;
   pctNoRepeat: number;
   count: number;
+  decisions: DerivedDecision[];
 }
 
 export interface TrendMonthRow {
@@ -146,6 +159,7 @@ export interface TrendMonthRow {
   monthLabel: string;
   pctWorseThanExpected: number;
   count: number;
+  decisions: DerivedDecision[];
 }
 
 export interface InsightsChartData {
@@ -342,6 +356,7 @@ function computeCalibrationChart(derived: DerivedDecision[]): CalibrationBucket[
       actualPctAsExpectedOrBetter: actualPct,
       idealPct,
       count,
+      decisions: inBucket,
     });
   }
   return result;
@@ -359,13 +374,13 @@ function computeInfluenceComparison(derived: DerivedDecision[]): InfluenceCompar
     external_pressure: 'External pressure',
     emotion: 'Emotion',
   };
-  const agg = new Map<DecisionDriver, { worse: number; notRepeat: number; n: number }>();
+  const agg = new Map<DecisionDriver, { worse: number; notRepeat: number; decisions: DerivedDecision[] }>();
   for (const d of derived) {
     const drivers = getDrivers(d.decision);
     if (drivers.length === 0) continue;
     for (const dr of drivers) {
-      const cur = agg.get(dr) ?? { worse: 0, notRepeat: 0, n: 0 };
-      cur.n += 1;
+      const cur = agg.get(dr) ?? { worse: 0, notRepeat: 0, decisions: [] };
+      cur.decisions.push(d);
       if (isWorseThanExpected(d.review.expectation_comparison)) cur.worse += 1;
       if (d.review.would_repeat === 'no') cur.notRepeat += 1;
       agg.set(dr, cur);
@@ -373,12 +388,14 @@ function computeInfluenceComparison(derived: DerivedDecision[]): InfluenceCompar
   }
   const result: InfluenceComparisonRow[] = [];
   for (const [driver, v] of agg.entries()) {
+    const n = v.decisions.length;
     result.push({
       driver,
       label: DRIVER_LABELS[driver],
-      pctWorseThanExpected: v.n > 0 ? round((v.worse / v.n) * 100) : 0,
-      pctNotRepeat: v.n > 0 ? round((v.notRepeat / v.n) * 100) : 0,
-      count: v.n,
+      pctWorseThanExpected: n > 0 ? round((v.worse / n) * 100) : 0,
+      pctNotRepeat: n > 0 ? round((v.notRepeat / n) * 100) : 0,
+      count: n,
+      decisions: v.decisions,
     });
   }
   result.sort((a, b) => b.count - a.count);
@@ -401,6 +418,7 @@ function computeDomainRegret(derived: DerivedDecision[]): DomainRegretRow[] {
       label: domain.charAt(0).toUpperCase() + domain.slice(1),
       pctNoRepeat,
       count,
+      decisions: inDomain,
     });
   }
   return result.filter((r) => r.count > 0);
@@ -410,12 +428,12 @@ function computeDomainRegret(derived: DerivedDecision[]): DomainRegretRow[] {
  * D) Trend over time: monthly % worse-than-expected
  */
 function computeTrendOverTime(derived: DerivedDecision[]): TrendMonthRow[] {
-  const byMonth = new Map<string, { worse: number; n: number }>();
+  const byMonth = new Map<string, { worse: number; decisions: DerivedDecision[] }>();
   for (const d of derived) {
     const date = d.reviewedAt;
     const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    const cur = byMonth.get(key) ?? { worse: 0, n: 0 };
-    cur.n += 1;
+    const cur = byMonth.get(key) ?? { worse: 0, decisions: [] };
+    cur.decisions.push(d);
     if (isWorseThanExpected(d.review.expectation_comparison)) cur.worse += 1;
     byMonth.set(key, cur);
   }
@@ -424,11 +442,13 @@ function computeTrendOverTime(derived: DerivedDecision[]): TrendMonthRow[] {
     const [y, m] = key.split('-');
     const monthLabel = new Date(parseInt(y, 10), parseInt(m, 10) - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
     const v = byMonth.get(key)!;
+    const n = v.decisions.length;
     return {
       month: key,
       monthLabel,
-      pctWorseThanExpected: v.n > 0 ? round((v.worse / v.n) * 100) : 0,
-      count: v.n,
+      pctWorseThanExpected: n > 0 ? round((v.worse / n) * 100) : 0,
+      count: n,
+      decisions: v.decisions,
     };
   });
   return result;
@@ -554,22 +574,40 @@ export async function generateInsights(decisions: Decision[], reviews: Review[])
   let confidence: ConfidenceInsight | null = null;
   if (reviewCount >= minimumReviewsNeeded) {
     const avgConf = Math.round(derived.reduce((s, d) => s + d.decision.confidence, 0) / reviewCount);
-    let well = 0, over = 0, under = 0;
+    const wellCalibratedDecisions: DerivedDecision[] = [];
+    const overconfidentDecisions: DerivedDecision[] = [];
+    const underconfidentDecisions: DerivedDecision[] = [];
     for (const d of derived) {
       const bandP = d.confProb;
       const outP = d.outcomeProb;
-      if (Math.abs(bandP - outP) <= 0.15) well++;
-      else if (bandP > outP) over++;
-      else under++;
+      if (Math.abs(bandP - outP) <= 0.15) wellCalibratedDecisions.push(d);
+      else if (bandP > outP) overconfidentDecisions.push(d);
+      else underconfidentDecisions.push(d);
     }
-    confidence = { emoji: '🎯', message: 'How your confidence matches reality', averageConfidence: avgConf, wellCalibratedCount: well, overconfidentCount: over, underconfidentCount: under };
+    confidence = {
+      emoji: '🎯',
+      message: 'How your confidence matches reality',
+      averageConfidence: avgConf,
+      wellCalibratedCount: wellCalibratedDecisions.length,
+      overconfidentCount: overconfidentDecisions.length,
+      underconfidentCount: underconfidentDecisions.length,
+      wellCalibratedDecisions,
+      overconfidentDecisions,
+      underconfidentDecisions,
+    };
   }
 
   // Surprise insight (show after 3+ reviews)
   let surprise: SurpriseInsight | null = null;
   if (reviewCount >= minimumReviewsNeeded) {
     const avgSurprise = round(derived.reduce((s, d) => s + d.review.surprise_score, 0) / reviewCount);
-    // simple domain most/least surprised
+    const decisionsByDomain = {} as Record<DecisionType, DerivedDecision[]>;
+    const domains: DecisionType[] = ['personal', 'work', 'finance', 'health', 'other'];
+    for (const dom of domains) decisionsByDomain[dom] = [];
+    for (const d of derived) {
+      const k = d.decision.decision_type;
+      decisionsByDomain[k].push(d);
+    }
     const domainMap = new Map<string, { n: number; tot: number }>();
     for (const d of derived) {
       const k = d.decision.decision_type;
@@ -584,37 +622,73 @@ export async function generateInsights(decisions: Decision[], reviews: Review[])
       if (av > mostVal) { mostVal = av; most = k; }
       if (av < leastVal) { leastVal = av; least = k; }
     }
-    surprise = { emoji: '😲', message: 'Where outcomes surprised you', averageSurpriseScore: avgSurprise, mostSurprisedDomain: most, leastSurprisedDomain: least };
+    surprise = {
+      emoji: '😲',
+      message: 'Where outcomes surprised you',
+      averageSurpriseScore: avgSurprise,
+      mostSurprisedDomain: most,
+      leastSurprisedDomain: least,
+      decisionsByDomain,
+    };
   }
 
   // Speed insight (show after 3+ reviews)
   let speed: SpeedInsight | null = null;
   if (reviewCount >= minimumReviewsNeeded) {
-    const buckets: Record<string, { n: number; regret: number }> = { quick: { n:0, regret:0 }, moderate: { n:0, regret:0 }, slow: { n:0, regret:0 } };
+    const quickDecisions: DerivedDecision[] = [];
+    const moderateDecisions: DerivedDecision[] = [];
+    const slowDecisions: DerivedDecision[] = [];
+    const buckets: Record<string, { regret: number; list: DerivedDecision[] }> = {
+      quick: { regret: 0, list: quickDecisions },
+      moderate: { regret: 0, list: moderateDecisions },
+      slow: { regret: 0, list: slowDecisions },
+    };
     for (const d of derived) {
       const s = d.decision.decision_speed;
-      const b = buckets[s] ?? { n:0, regret:0 };
-      b.n++;
-      if (d.review.would_repeat === 'no') b.regret++;
-      buckets[s] = b;
+      const b = buckets[s];
+      if (b) {
+        b.list.push(d);
+        if (d.review.would_repeat === 'no') b.regret++;
+      }
     }
-    const q = buckets.quick.n ? Math.round((buckets.quick.regret / buckets.quick.n) * 100) : 0;
-    const m = buckets.moderate.n ? Math.round((buckets.moderate.regret / buckets.moderate.n) * 100) : 0;
-    const srate = buckets.slow.n ? Math.round((buckets.slow.regret / buckets.slow.n) * 100) : 0;
-    speed = { emoji: '🏃', message: 'Speed vs regret patterns', quickDecisionsRegretRate: q, moderateDecisionsRegretRate: m, slowDecisionsRegretRate: srate };
+    const q = quickDecisions.length ? Math.round((buckets.quick.regret / quickDecisions.length) * 100) : 0;
+    const m = moderateDecisions.length ? Math.round((buckets.moderate.regret / moderateDecisions.length) * 100) : 0;
+    const srate = slowDecisions.length ? Math.round((buckets.slow.regret / slowDecisions.length) * 100) : 0;
+    speed = {
+      emoji: '🏃',
+      message: 'Speed vs regret patterns',
+      quickDecisionsRegretRate: q,
+      moderateDecisionsRegretRate: m,
+      slowDecisionsRegretRate: srate,
+      quickDecisions,
+      moderateDecisions,
+      slowDecisions,
+    };
   }
 
   // Repeat insight (show after 3+ reviews)
   let repeat: RepeatInsight | null = null;
   if (reviewCount >= minimumReviewsNeeded) {
-    let would = 0, wouldNot = 0, unsure = 0;
+    const wouldRepeatDecisions: DerivedDecision[] = [];
+    const wouldNotRepeatDecisions: DerivedDecision[] = [];
+    const unsureDecisions: DerivedDecision[] = [];
     for (const d of derived) {
-      if (d.review.would_repeat === 'yes') would++;
-      else if (d.review.would_repeat === 'no') wouldNot++;
-      else unsure++;
+      if (d.review.would_repeat === 'yes') wouldRepeatDecisions.push(d);
+      else if (d.review.would_repeat === 'no') wouldNotRepeatDecisions.push(d);
+      else unsureDecisions.push(d);
     }
-    const rate = Math.round((would / reviewCount) * 100);
-    repeat = { emoji: '🔁', message: 'How often you would repeat decisions', repeatRate: rate, wouldRepeatCount: would, wouldNotRepeatCount: wouldNot, unsureCount: unsure };
+    const rate = Math.round((wouldRepeatDecisions.length / reviewCount) * 100);
+    repeat = {
+      emoji: '🔁',
+      message: 'How often you would repeat decisions',
+      repeatRate: rate,
+      wouldRepeatCount: wouldRepeatDecisions.length,
+      wouldNotRepeatCount: wouldNotRepeatDecisions.length,
+      unsureCount: unsureDecisions.length,
+      wouldRepeatDecisions,
+      wouldNotRepeatDecisions,
+      unsureDecisions,
+    };
   }
 
   // Chart data for calibration, influence, domain regret, trend (always compute when we have reviews)
