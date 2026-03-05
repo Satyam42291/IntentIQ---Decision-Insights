@@ -93,12 +93,25 @@ export interface ConfidenceInsight {
   underconfidentDecisions: DerivedDecision[];
 }
 
+/** Row for surprise trend chart: monthly % high surprise (>70) */
+export interface SurpriseTrendMonthRow {
+  month: string;
+  monthLabel: string;
+  pctHighSurprise: number;
+  count: number;
+  decisions: DerivedDecision[];
+  highSurpriseDecisions: DerivedDecision[];
+}
+
 export interface SurpriseInsight {
   emoji: string;
   message: string;
-  averageSurpriseScore: number;
-  mostSurprisedDomain?: string;
-  leastSurprisedDomain?: string;
+  /** % of all reviewed decisions with surprise_score > 70 */
+  pctHighSurprise: number;
+  highSurpriseCount: number;
+  highSurpriseDecisions: DerivedDecision[];
+  /** Monthly trend: % high surprise per month (for chart) */
+  surpriseTrendOverTime: SurpriseTrendMonthRow[];
   decisionsByDomain: Record<DecisionType, DerivedDecision[]>;
 }
 
@@ -454,6 +467,42 @@ function computeTrendOverTime(derived: DerivedDecision[]): TrendMonthRow[] {
   return result;
 }
 
+/** High surprise threshold: surprise_score > this = "high surprise" */
+const HIGH_SURPRISE_THRESHOLD = 70;
+
+/**
+ * E) Surprise trend over time: monthly % of decisions with surprise_score > 70
+ */
+function computeSurpriseTrendOverTime(derived: DerivedDecision[]): SurpriseTrendMonthRow[] {
+  const byMonth = new Map<string, { high: number; decisions: DerivedDecision[]; highDecisions: DerivedDecision[] }>();
+  for (const d of derived) {
+    const date = d.reviewedAt;
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const cur = byMonth.get(key) ?? { high: 0, decisions: [], highDecisions: [] };
+    cur.decisions.push(d);
+    if (d.review.surprise_score > HIGH_SURPRISE_THRESHOLD) {
+      cur.high += 1;
+      cur.highDecisions.push(d);
+    }
+    byMonth.set(key, cur);
+  }
+  const sortedKeys = Array.from(byMonth.keys()).sort();
+  return sortedKeys.map((key) => {
+    const [y, m] = key.split('-');
+    const monthLabel = new Date(parseInt(y, 10), parseInt(m, 10) - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+    const v = byMonth.get(key)!;
+    const n = v.decisions.length;
+    return {
+      month: key,
+      monthLabel,
+      pctHighSurprise: n > 0 ? round((v.high / n) * 100) : 0,
+      count: n,
+      decisions: v.decisions,
+      highSurpriseDecisions: v.highDecisions,
+    };
+  });
+}
+
 /**
  * Trend analyzer: compare last N vs previous N
  */
@@ -597,10 +646,13 @@ export async function generateInsights(decisions: Decision[], reviews: Review[])
     };
   }
 
-  // Surprise insight (show after 3+ reviews)
+  // Surprise insight (show after 3+ reviews): % high surprise (>70) + trend over time
   let surprise: SurpriseInsight | null = null;
   if (reviewCount >= minimumReviewsNeeded) {
-    const avgSurprise = round(derived.reduce((s, d) => s + d.review.surprise_score, 0) / reviewCount);
+    const highSurpriseDecisions = derived.filter((d) => d.review.surprise_score > HIGH_SURPRISE_THRESHOLD);
+    const highSurpriseCount = highSurpriseDecisions.length;
+    const pctHighSurprise = round((highSurpriseCount / reviewCount) * 100);
+    const surpriseTrendOverTime = computeSurpriseTrendOverTime(derived);
     const decisionsByDomain = {} as Record<DecisionType, DerivedDecision[]>;
     const domains: DecisionType[] = ['personal', 'work', 'finance', 'health', 'other'];
     for (const dom of domains) decisionsByDomain[dom] = [];
@@ -608,26 +660,13 @@ export async function generateInsights(decisions: Decision[], reviews: Review[])
       const k = d.decision.decision_type;
       decisionsByDomain[k].push(d);
     }
-    const domainMap = new Map<string, { n: number; tot: number }>();
-    for (const d of derived) {
-      const k = d.decision.decision_type;
-      const cur = domainMap.get(k) ?? { n: 0, tot: 0 };
-      cur.n += 1;
-      cur.tot += d.review.surprise_score;
-      domainMap.set(k, cur);
-    }
-    let most: string | undefined; let least: string | undefined; let mostVal = -Infinity; let leastVal = Infinity;
-    for (const [k, v] of domainMap.entries()) {
-      const av = v.tot / v.n;
-      if (av > mostVal) { mostVal = av; most = k; }
-      if (av < leastVal) { leastVal = av; least = k; }
-    }
     surprise = {
       emoji: '😲',
-      message: 'Where outcomes surprised you',
-      averageSurpriseScore: avgSurprise,
-      mostSurprisedDomain: most,
-      leastSurprisedDomain: least,
+      message: 'Where outcomes surprised you — high surprise suggests forecasting error; self-reported surprise can be noisy.',
+      pctHighSurprise,
+      highSurpriseCount,
+      highSurpriseDecisions,
+      surpriseTrendOverTime,
       decisionsByDomain,
     };
   }

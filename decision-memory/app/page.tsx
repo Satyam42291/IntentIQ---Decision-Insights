@@ -21,7 +21,7 @@ export default function Home() {
       {/* Navigation */}
       <nav className="border-b border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-blue-600 dark:text-blue-400">📔 Decision Memory</h1>
+          <h1 className="text-2xl font-bold text-blue-600 dark:text-blue-400">📔 IntentIQ</h1>
           <div className="flex gap-3 items-center">
             <Link
               href="/due"
@@ -68,7 +68,7 @@ export default function Home() {
             href="/capture"
             className="inline-block bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white px-8 py-4 rounded-lg font-semibold text-lg transition-colors"
           >
-            Log Your First Decision
+            Log Your Decision
           </Link>
         </div>
 
